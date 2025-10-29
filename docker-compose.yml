@@ -17,7 +17,7 @@ services:
   # Task Service
   task-service:
     # build: ./task-service
-    image: dockeramiro/ucb-task-service:v1.0.0
+    image: dockeramiro/ucb-task-service:v1.0.1
     ports:
       - "${TASK_SERVICE_PORT}:3001"
     environment:

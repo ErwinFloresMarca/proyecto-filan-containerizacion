@@ -26,6 +26,8 @@ RUN npm run build
 FROM node:20-alpine as runtime
 WORKDIR /app
 
+RUN apk add --no-cache openssl
+
 # Copiar solo los archivos necesarios desde el builder
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/package-lock.json ./
