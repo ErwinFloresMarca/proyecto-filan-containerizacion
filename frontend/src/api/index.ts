@@ -1,11 +1,11 @@
 import axios from 'axios';
 
 const taskApi = axios.create({
-  baseURL: 'http://localhost:3001',
+  baseURL: import.meta.env.VITE_TASK_SERVICE_URL || 'http://192.168.122.53:3001',
 });
 
 const userApi = axios.create({
-  baseURL: 'http://localhost:3002',
+  baseURL: import.meta.env.VITE_USER_SERVICE_URL || 'http://192.168.122.54:3002',
 });
 
 export interface Task {
