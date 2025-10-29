@@ -1,0 +1,274 @@
+version: '3.8'
+
+services:
+  # Frontend
+  frontend:
+    image: dockeramiro/ucb-frontend-pf:v1.0.0
+    ports:
+      - target: 5173
+        published: ${FRONTEND_PORT:-5173}
+        protocol: tcp
+        mode: host
+    environment:
+      - VITE_TASK_SERVICE_URL=http://localhost:${TASK_SERVICE_PORT:-3001}
+      - VITE_USER_SERVICE_URL=http://localhost:${USER_SERVICE_PORT:-3002}
+    networks:
+      - app-network
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      labels:
+        - "com.example.service=frontend"
+
+  # Task Service
+  task-service:
+    image: dockeramiro/ucb-task-service:v1.0.1
+    ports:
+      - target: 3001
+        published: ${TASK_SERVICE_PORT:-3001}
+        protocol: tcp
+        mode: host
+    environment:
+      - DATABASE_URL=mysql://${MYSQL_USER:-taskuser}:${MYSQL_PASSWORD:-taskpass}@mysql:3306/${MYSQL_DB:-tasks}
+      - PORT=3001
+      - WAIT_HOSTS=mysql:3306
+      - WAIT_TIMEOUT=300
+      - WAIT_SLEEP_INTERVAL=10
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      replicas: 3
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      labels:
+        - "com.example.service=task-service"
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # User Service
+  user-service:
+    image: dockeramiro/ucb-user-service:v1.0.0
+    ports:
+      - target: 3002
+        published: ${USER_SERVICE_PORT:-3002}
+        protocol: tcp
+        mode: host
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017/${MONGO_INITDB_DATABASE:-users}
+      - PORT=3002
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      replicas: 3
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      labels:
+        - "com.example.service=user-service"
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_DATABASE: ${MYSQL_DB:-tasks}
+      MYSQL_USER: ${MYSQL_USER:-taskuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-taskpass}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - type: bind
+        source: ./mysql-init
+        target: /docker-entrypoint-initdb.d
+        read_only: true
+    ports:
+      - target: 3306
+        published: 3306
+        protocol: tcp
+        mode: host
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "${MYSQL_USER:-taskuser}", "-p${MYSQL_PASSWORD:-taskpass}"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - app-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+        window: 120s
+      labels:
+        - "com.example.service=mysql"
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # MongoDB Database
+  mongodb:
+    image: mongo:7-jammy
+    environment:
+      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE:-users}
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - target: 27017
+        published: 27017
+        protocol: tcp
+        mode: host
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+        window: 120s
+      labels:
+        - "com.example.service=mongodb"
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - target: 9090
+        published: 9090
+        protocol: tcp
+        mode: host
+    volumes:
+      - type: bind
+        source: ./monitoring/prometheus.yml
+        target: /etc/prometheus/prometheus.yml
+        read_only: true
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - app-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - "com.example.service=prometheus"
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - target: 3000
+        published: 3005
+        protocol: tcp
+        mode: host
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GF_SECURITY_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - type: bind
+        source: ./monitoring/dashboards
+        target: /etc/grafana/provisioning/dashboards
+        read_only: true
+      - type: bind
+        source: ./monitoring/datasources
+        target: /etc/grafana/provisioning/datasources
+        read_only: true
+    networks:
+      - app-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - "com.example.service=grafana"
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+volumes:
+  mysql_data:
+    driver: local
+  mongo_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  app-network:
+    driver: overlay
+    attachable: true
