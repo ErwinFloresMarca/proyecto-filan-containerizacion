@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:20-alpine as builder
 
 WORKDIR /app
 
@@ -20,8 +20,26 @@ RUN npx prisma generate
 # Build the application
 RUN npm run build
 
+# -----------------------------
+# ETAPA 2: Ejecución (runtime)
+# -----------------------------
+FROM node:20-alpine as runtime
+WORKDIR /app
+
+# Copiar solo los archivos necesarios desde el builder
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/package-lock.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/tsconfig.json ./tsconfig.json
+# Copiar el script de entrada
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+ENV NODE_ENV=production
 # Expose port
 EXPOSE 3001
 
 # Start the application
-CMD ["sh", "-c", "npx prisma migrate deploy && npm run start:prod"]
+ENTRYPOINT ["/app/entrypoint.sh"]
